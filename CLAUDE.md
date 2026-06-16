@@ -24,7 +24,11 @@ CGo shared-library plugin for CLIProxyAPI (CPA). No `net/url` or `net/http` — 
 
 **main.go** — `buildPlugin()` returns `pluginapi.Plugin` with metadata and supplementary fields (model scope, input/output formats). The `Capabilities.Executor`/`AuthProvider`/`ModelProvider` interface fields remain nil; they are not used for registration.
 
-**joycode.go** — All business logic. Key functions: `handleExecutorExecute`/`handleExecutorExecuteStream` (chat completions), `handleAuthParse`/`handleAuthLoginStart`/`handleAuthLoginPoll`/`handleAuthRefresh` (auth lifecycle), `handleModelStatic`/`handleModelForAuth` (model list), `injectPayloadFields` (payload enrichment with JoyCode-specific fields), `decompressGzip` (response decompression), `verifyJoyCodeToken` (ptKey validation via userInfo API).
+**joycode.go** — All business logic. Key functions: `handleExecutorExecute`/`handleExecutorExecuteStream` (chat completions), `handleAuthParse`/`handleAuthLoginStart`/`handleAuthLoginPoll`/`handleAuthRefresh` (auth lifecycle), `handleModelStatic`/`handleModelForAuth` (model list), `injectPayloadFields` (set model + thinking + stream_options on payload), `decompressGzip` (response decompression), `verifyJoyCodeToken` (ptKey validation via userInfo API), `colorGatewayURL` (HMAC-signed URL construction for color gateway).
+
+**Color Gateway**: All authenticated API calls go through `api-ai.jd.com` (the "color gateway") with HMAC-SHA256 signed URL parameters. `colorGatewayURL(functionId)` builds the signed URL: params sorted by key, values joined with `&`, HMAC-SHA256 with secret `0691a3f0b37b4a85aeb63ad0fc7db3ed`, appid `joycode_ide`. Function IDs: `joycode_userInfo` (user info V2), `joycode_modelList` (model list), `chat_completions` (chat). All requests require `ptKey`, `loginType`, `tenant` headers.
+
+**Model list response**: API returns `chatApiModel` as model ID, `label` as display name, plus `description`, `maxTotalTokens`→`context_length`, `respMaxTokens`→`max_completion_tokens`, `createTime` (ms→s), `features`→`supported_parameters`. Both `hidden` and `isHidden` flags are checked.
 
 **Registration JSON field names**: `pluginapi.Metadata` has no json tags, so fields serialize as Go defaults (uppercase: `Name`, `Version`, `Author`, `GitHubRepository`). The host expects these exact names. The `TestABIRegistrationSerializesCorrectFieldNames` test guards against mismatches.
 
@@ -32,6 +36,7 @@ CGo shared-library plugin for CLIProxyAPI (CPA). No `net/url` or `net/http` — 
 
 ## Key constraints
 
-- `defaultLoginType` is `"N_PIN_PC"` — `loginTypeFromAuthMetadata` reads from `AuthMetadata["loginType"]` with this fallback, supporting multiple JD account types.
+- `defaultLoginType` is `"PIN_JD_CLOUD"` — `loginTypeFromAuthMetadata` reads from `AuthMetadata["loginType"]` with this fallback, supporting multiple JD account types.
 - `reasoningModels` map (`GLM-5.1`, `Kimi-K2.6`, `MiniMax-M2.7`) preserves existing `thinking` param; non-reasoning models always get `thinking: {type: "disabled"}`.
 - Stream handling: `readAndEmitStreamChunks` runs in a goroutine, reading chunks via `host.http.stream_read` and emitting SSE lines via `host.stream.emit`.
+- Color gateway `chat_completions` returns `text/event-stream` (SSE). The signing algorithm and secret must stay in sync with the JoyCode IDE source — grep `0691a3f0b37b4a85` in the IDE `out/main.js` to verify.

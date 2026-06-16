@@ -4,7 +4,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
 )
 
-var pluginVersion = "0.1.3"
+var pluginVersion = "0.2.0"
 
 const pluginName = "joycode"
 

@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 )
@@ -15,10 +18,10 @@ func TestLoginTypeFromAuthMetadata(t *testing.T) {
 		want string
 	}{
 		{"string value", map[string]any{"loginType": "PIN_JD_CLOUD"}, "PIN_JD_CLOUD"},
-		{"empty string falls back", map[string]any{"loginType": ""}, "N_PIN_PC"},
-		{"missing key falls back", map[string]any{}, "N_PIN_PC"},
-		{"wrong type falls back", map[string]any{"loginType": 123}, "N_PIN_PC"},
-		{"nil metadata", nil, "N_PIN_PC"},
+		{"empty string falls back", map[string]any{"loginType": ""}, "PIN_JD_CLOUD"},
+		{"missing key falls back", map[string]any{}, "PIN_JD_CLOUD"},
+		{"wrong type falls back", map[string]any{"loginType": 123}, "PIN_JD_CLOUD"},
+		{"nil metadata", nil, "PIN_JD_CLOUD"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -177,7 +180,7 @@ func TestInjectPayloadFields(t *testing.T) {
 		input := map[string]any{"messages": []any{"hello"}}
 		inputJSON, _ := json.Marshal(input)
 
-		result := injectPayloadFields(inputJSON, "GLM-5.1", "user123")
+		result := injectPayloadFields(inputJSON, "GLM-5.1")
 
 		var out map[string]any
 		if err := json.Unmarshal(result, &out); err != nil {
@@ -187,22 +190,8 @@ func TestInjectPayloadFields(t *testing.T) {
 		if out["model"] != "GLM-5.1" {
 			t.Errorf("model = %v, want GLM-5.1", out["model"])
 		}
-		if out["tenant"] != "JOYCODE" {
-			t.Errorf("tenant = %v, want JOYCODE", out["tenant"])
-		}
-		if out["userId"] != "user123" {
-			t.Errorf("userId = %v, want user123", out["userId"])
-		}
-		if out["client"] != "JoyCode" {
-			t.Errorf("client = %v, want JoyCode", out["client"])
-		}
-		if out["clientVersion"] != JCClientVersion {
-			t.Errorf("clientVersion = %v, want %s", out["clientVersion"], JCClientVersion)
-		}
-		for _, key := range []string{"sessionId", "chatId", "requestId"} {
-			if _, ok := out[key]; !ok {
-				t.Errorf("missing key %q", key)
-			}
+		if _, ok := out["stream_options"]; !ok {
+			t.Error("missing stream_options")
 		}
 	})
 
@@ -211,7 +200,7 @@ func TestInjectPayloadFields(t *testing.T) {
 		inputJSON, _ := json.Marshal(input)
 
 		for _, model := range []string{"GLM-5.1", "Kimi-K2.6", "MiniMax-M2.7"} {
-			result := injectPayloadFields(inputJSON, model, "")
+			result := injectPayloadFields(inputJSON, model)
 			var out map[string]any
 			json.Unmarshal(result, &out)
 			thinking, _ := out["thinking"].(map[string]any)
@@ -228,7 +217,7 @@ func TestInjectPayloadFields(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result := injectPayloadFields(inputJSON, "GLM-5.1", "")
+		result := injectPayloadFields(inputJSON, "GLM-5.1")
 		var out map[string]any
 		json.Unmarshal(result, &out)
 		thinking, _ := out["thinking"].(map[string]any)
@@ -244,7 +233,7 @@ func TestInjectPayloadFields(t *testing.T) {
 		}
 		inputJSON, _ := json.Marshal(input)
 
-		result := injectPayloadFields(inputJSON, "JoyAI-Code", "")
+		result := injectPayloadFields(inputJSON, "JoyAI-Code")
 		var out map[string]any
 		json.Unmarshal(result, &out)
 		thinking, _ := out["thinking"].(map[string]any)
@@ -253,24 +242,9 @@ func TestInjectPayloadFields(t *testing.T) {
 		}
 	})
 
-	t.Run("preserves existing sessionId/chatId/requestId", func(t *testing.T) {
-		input := map[string]any{
-			"messages":  []any{"hello"},
-			"sessionId": "keep-this",
-		}
-		inputJSON, _ := json.Marshal(input)
-
-		result := injectPayloadFields(inputJSON, "JoyAI-Code", "")
-		var out map[string]any
-		json.Unmarshal(result, &out)
-		if out["sessionId"] != "keep-this" {
-			t.Errorf("sessionId = %v, want keep-this", out["sessionId"])
-		}
-	})
-
 	t.Run("invalid JSON passthrough", func(t *testing.T) {
 		bad := []byte("{not valid json")
-		result := injectPayloadFields(bad, "JoyAI-Code", "")
+		result := injectPayloadFields(bad, "JoyAI-Code")
 		if !bytes.Equal(result, bad) {
 			t.Error("invalid JSON should be returned unchanged")
 		}
@@ -278,7 +252,7 @@ func TestInjectPayloadFields(t *testing.T) {
 }
 
 func TestBuildJCHeaders(t *testing.T) {
-	headers := buildJCHeaders("my-ptkey", "N_PIN_PC")
+	headers := buildJCHeaders("my-ptkey", "PIN_JD_CLOUD", "JD")
 
 	ptKey, _ := headers["ptKey"].([]string)
 	if len(ptKey) == 0 || ptKey[0] != "my-ptkey" {
@@ -286,8 +260,13 @@ func TestBuildJCHeaders(t *testing.T) {
 	}
 
 	loginType, _ := headers["loginType"].([]string)
-	if len(loginType) == 0 || loginType[0] != "N_PIN_PC" {
-		t.Errorf("loginType header = %v, want [N_PIN_PC]", loginType)
+	if len(loginType) == 0 || loginType[0] != "PIN_JD_CLOUD" {
+		t.Errorf("loginType header = %v, want [PIN_JD_CLOUD]", loginType)
+	}
+
+	tenant, _ := headers["tenant"].([]string)
+	if len(tenant) == 0 || tenant[0] != "JD" {
+		t.Errorf("tenant header = %v, want [JD]", tenant)
 	}
 
 	requiredHeaders := []string{"Content-Type", "User-Agent", "Accept", "Accept-Encoding", "Connection"}
@@ -306,7 +285,7 @@ func TestHandleAuthParse(t *testing.T) {
 			"userId":       "user1",
 			"tenant":       "JD",
 			"orgFullName":  "Org",
-			"loginType":    "N_PIN_PC",
+			"loginType":    "PIN_JD_CLOUD",
 		}
 		rawJSON, _ := json.Marshal(raw)
 
@@ -456,6 +435,36 @@ func mapKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func TestColorGatewaySign(t *testing.T) {
+	// Verify HMAC-SHA256 algorithm against captured mitmproxy flow data.
+	tests := []struct {
+		name     string
+		signStr  string
+		expected string
+	}{
+		{
+			name:     "modelList",
+			signStr:  "joycode_ide&joycode_modelList&1781629681134",
+			expected: "469fe1b57c53995da45f01656713a6bc40b1e50cb930e1d47d0b7f2908a8f71c",
+		},
+		{
+			name:     "chat_completions",
+			signStr:  "joycode_ide&chat_completions&1781631584594",
+			expected: "2956521680734ae9d1316c0751b5b5f0744cc1533782fe04c2cc21fef3e7dae4",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mac := hmac.New(sha256.New, []byte(JCColorSecret))
+			mac.Write([]byte(tt.signStr))
+			got := hex.EncodeToString(mac.Sum(nil))
+			if got != tt.expected {
+				t.Errorf("HMAC-SHA256(%q) = %s, want %s", tt.signStr, got, tt.expected)
+			}
+		})
+	}
 }
 
 func TestHandleModelStatic(t *testing.T) {

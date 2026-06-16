@@ -4,27 +4,34 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 )
 
 // JoyCode API constants.
 const (
-	JCBaseURL       = "https://joycode-api.jd.com"
-	JCUserInfoPath  = "/api/saas/user/v1/userInfo"
-	JCModelList     = "/api/saas/models/v1/modelList"
-	JCChatPath      = "/api/saas/openai/v1/chat/completions"
-	JCClientVersion = "2.4.8"
-	JCUserAgent     = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
-		"AppleWebKit/537.36 (KHTML, like Gecko) " +
-		"JoyCode/2.4.8 Chrome/133.0.0.0 Electron/35.2.0 Safari/537.36"
-	defaultLoginType = "N_PIN_PC"
+	JCUserAgent      = "node"
+	defaultLoginType = "PIN_JD_CLOUD"
+
+	// Color gateway (api-ai.jd.com) — all authenticated API calls go through this.
+	JCColorGateway = "https://api-ai.jd.com"
+	JCColorAPIPath = "/api"
+	JCColorSecret  = "0691a3f0b37b4a85aeb63ad0fc7db3ed"
+	JCColorAppID   = "joycode_ide"
+
+	// Color gateway function IDs.
+	jcFnUserInfo      = "joycode_userInfo"
+	jcFnModelList     = "joycode_modelList"
+	jcFnChatComplete  = "chat_completions"
 )
 
 // Known JoyCode models.
@@ -41,6 +48,38 @@ type modelInfo struct {
 	Object      string `json:"object"`
 	OwnedBy     string `json:"owned_by"`
 	DisplayName string `json:"display_name,omitempty"`
+}
+
+// colorGatewayURL builds a signed URL for the JoyCode color gateway.
+// Params are sorted by key, values joined with "&", then HMAC-SHA256 signed.
+func colorGatewayURL(functionId string) string {
+	t := time.Now().UnixMilli()
+	params := map[string]string{
+		"appid":      JCColorAppID,
+		"functionId": functionId,
+		"t":          fmt.Sprintf("%d", t),
+	}
+
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var vals []string
+	for _, k := range keys {
+		if v := params[k]; v != "" {
+			vals = append(vals, v)
+		}
+	}
+	signStr := strings.Join(vals, "&")
+
+	mac := hmac.New(sha256.New, []byte(JCColorSecret))
+	mac.Write([]byte(signStr))
+	sign := hex.EncodeToString(mac.Sum(nil))
+
+	return fmt.Sprintf("%s%s?appid=%s&functionId=%s&t=%d&sign=%s",
+		JCColorGateway, JCColorAPIPath, JCColorAppID, functionId, t, sign)
 }
 
 // --- executor.identifier ---
@@ -100,14 +139,14 @@ func handleExecutorExecute(reqBody []byte) ([]byte, error) {
 		return nil, fmt.Errorf("joycode: missing ptKey in auth metadata")
 	}
 	loginType := loginTypeFromAuthMetadata(req.AuthMetadata)
-	userID, _ := req.AuthMetadata["userId"].(string)
+	tenant, _ := req.AuthMetadata["tenant"].(string)
 
-	modifiedPayload := injectPayloadFields(payloadBytes, req.Model, userID)
-	headers := buildJCHeaders(ptKey, loginType)
+	modifiedPayload := injectPayloadFields(payloadBytes, req.Model)
+	headers := buildJCHeaders(ptKey, loginType, tenant)
 
 	httpReq := map[string]any{
 		"method":  "POST",
-		"url":     JCBaseURL + JCChatPath,
+		"url":     colorGatewayURL(jcFnChatComplete),
 		"headers": headers,
 		"body":    base64.StdEncoding.EncodeToString(modifiedPayload),
 	}
@@ -169,14 +208,14 @@ func handleExecutorExecuteStream(reqBody []byte) ([]byte, error) {
 		return nil, fmt.Errorf("missing ptKey")
 	}
 	loginType := loginTypeFromAuthMetadata(req.AuthMetadata)
-	userID, _ := req.AuthMetadata["userId"].(string)
+	tenant, _ := req.AuthMetadata["tenant"].(string)
 
-	modifiedPayload := injectPayloadFields(payloadBytes, req.Model, userID)
-	headers := buildJCHeaders(ptKey, loginType)
+	modifiedPayload := injectPayloadFields(payloadBytes, req.Model)
+	headers := buildJCHeaders(ptKey, loginType, tenant)
 
 	streamReq := map[string]any{
 		"method":  "POST",
-		"url":     JCBaseURL + JCChatPath,
+		"url":     colorGatewayURL(jcFnChatComplete),
 		"headers": headers,
 		"body":    base64.StdEncoding.EncodeToString(modifiedPayload),
 	}
@@ -826,19 +865,23 @@ func handleModelForAuth(reqBody []byte) ([]byte, error) {
 	}
 
 	loginType := loginTypeFromAuthMetadata(req.Metadata)
+	tenant, _ := req.Metadata["tenant"].(string)
 
 	headers := map[string]any{
 		"Content-Type": []string{"application/json; charset=UTF-8"},
 		"ptKey":        []string{ptKey},
 		"loginType":    []string{loginType},
 		"User-Agent":   []string{JCUserAgent},
-		"Accept":       []string{"application/json"},
+		"Accept":       []string{"*/*"},
+	}
+	if tenant != "" {
+		headers["tenant"] = []string{tenant}
 	}
 
 	emptyBody := base64.StdEncoding.EncodeToString([]byte("{}"))
 	httpReq := map[string]any{
 		"method":  "POST",
-		"url":     JCBaseURL + JCModelList,
+		"url":     colorGatewayURL(jcFnModelList),
 		"headers": headers,
 		"body":    emptyBody,
 	}
@@ -895,8 +938,9 @@ func handleModelForAuth(reqBody []byte) ([]byte, error) {
 		if !ok {
 			continue
 		}
+		isHidden, _ := itemMap["isHidden"].(bool)
 		hidden, _ := itemMap["hidden"].(bool)
-		if hidden {
+		if isHidden || hidden {
 			continue
 		}
 		modelID, _ := itemMap["chatApiModel"].(string)
@@ -907,13 +951,39 @@ func handleModelForAuth(reqBody []byte) ([]byte, error) {
 			continue
 		}
 		displayName, _ := itemMap["label"].(string)
-		models = append(models, map[string]any{
-			"id":           modelID,
-			"object":       "model",
-			"created":      now,
-			"owned_by":     "joycode",
-			"display_name": displayName,
-		})
+		description, _ := itemMap["description"].(string)
+		maxTotal, _ := itemMap["maxTotalTokens"].(float64)
+		respMax, _ := itemMap["respMaxTokens"].(float64)
+		createTime, _ := itemMap["createTime"].(float64)
+		features, _ := itemMap["features"].([]any)
+
+		var created int64
+		if createTime > 0 {
+			created = int64(createTime) / 1000
+		} else {
+			created = now
+		}
+
+		m := map[string]any{
+			"id":                  modelID,
+			"object":              "model",
+			"created":             created,
+			"owned_by":            "joycode",
+			"display_name":        displayName,
+			"description":         description,
+			"context_length":      int64(maxTotal),
+			"max_completion_tokens": int64(respMax),
+		}
+		if len(features) > 0 {
+			params := make([]string, 0, len(features))
+			for _, f := range features {
+				if s, ok := f.(string); ok {
+					params = append(params, s)
+				}
+			}
+			m["supported_parameters"] = params
+		}
+		models = append(models, m)
 	}
 
 	if len(models) == 0 {
@@ -928,17 +998,21 @@ func handleModelForAuth(reqBody []byte) ([]byte, error) {
 
 // --- Internal helpers ---
 
-func buildJCHeaders(ptKey, loginType string) map[string]any {
-	return map[string]any{
+func buildJCHeaders(ptKey, loginType, tenant string) map[string]any {
+	h := map[string]any{
 		"Content-Type":    []string{"application/json; charset=UTF-8"},
 		"ptKey":           []string{ptKey},
 		"loginType":       []string{loginType},
 		"User-Agent":      []string{JCUserAgent},
 		"Accept":          []string{"*/*"},
 		"Accept-Encoding": []string{"gzip, deflate, br"},
-		"Accept-Language": []string{"zh-CN,zh;q=0.9,en;q=0.8"},
+		"Accept-Language": []string{"*"},
 		"Connection":      []string{"keep-alive"},
 	}
+	if tenant != "" {
+		h["tenant"] = []string{tenant}
+	}
+	return h
 }
 
 var reasoningModels = map[string]bool{
@@ -947,21 +1021,14 @@ var reasoningModels = map[string]bool{
 	"MiniMax-M2.7": true,
 }
 
-func injectPayloadFields(openaiPayload []byte, modelName, userID string) []byte {
+func injectPayloadFields(openaiPayload []byte, modelName string) []byte {
 	var payload map[string]any
 	if err := json.Unmarshal(openaiPayload, &payload); err != nil {
 		return openaiPayload
 	}
 
 	payload["model"] = modelName
-	payload["tenant"] = "JOYCODE"
-	payload["userId"] = userID
-	payload["client"] = "JoyCode"
-	payload["clientVersion"] = JCClientVersion
 	payload["stream_options"] = map[string]any{"include_usage": true}
-	payload["language"] = "text"
-	payload["scene"] = "chat"
-	payload["source"] = "joyCoderFe"
 
 	if reasoningModels[modelName] {
 		if _, ok := payload["thinking"]; !ok {
@@ -971,27 +1038,11 @@ func injectPayloadFields(openaiPayload []byte, modelName, userID string) []byte 
 		payload["thinking"] = map[string]any{"type": "disabled"}
 	}
 
-	if _, ok := payload["sessionId"]; !ok {
-		payload["sessionId"] = newHexID()
-	}
-	if _, ok := payload["chatId"]; !ok {
-		payload["chatId"] = newHexID()
-	}
-	if _, ok := payload["requestId"]; !ok {
-		payload["requestId"] = newHexID()
-	}
-
 	result, err := json.Marshal(payload)
 	if err != nil {
 		return openaiPayload
 	}
 	return result
-}
-
-func newHexID() string {
-	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
 }
 
 func decompressGzip(data []byte, headers map[string][]string) []byte {
@@ -1046,8 +1097,8 @@ func verifyJoyCodeToken(ptKey, loginType string) (*joyCodeTokenResult, error) {
 
 	emptyBody := base64.StdEncoding.EncodeToString([]byte("{}"))
 	httpReq := map[string]any{
-		"method":  "POST",
-		"url":     JCBaseURL + JCUserInfoPath,
+		"method":  "GET",
+		"url":     colorGatewayURL(jcFnUserInfo),
 		"headers": headers,
 		"body":    emptyBody,
 	}
