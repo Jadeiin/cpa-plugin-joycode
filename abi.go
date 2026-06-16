@@ -201,12 +201,12 @@ func handleRegister(request []byte) ([]byte, error) {
 		SchemaVersion: pluginabi.SchemaVersion,
 		Metadata:      plugin.Metadata,
 		Capabilities: abiCapabilities{
-			Executor:             plugin.Capabilities.Executor != nil,
+			Executor:              true,
 			ExecutorModelScope:   string(plugin.Capabilities.ExecutorModelScope),
 			ExecutorInputFormats: plugin.Capabilities.ExecutorInputFormats,
 			ExecutorOutputFormats: plugin.Capabilities.ExecutorOutputFormats,
-			AuthProvider:         plugin.Capabilities.AuthProvider != nil,
-			ModelProvider:         plugin.Capabilities.ModelProvider != nil,
+			AuthProvider:         true,
+			ModelProvider:        true,
 		},
 	})
 }
