@@ -65,7 +65,7 @@ The Makefile chooses the plugin extension from the target platform:
 Release builds can inject the runtime plugin version:
 
 ```bash
-make build VERSION=0.2.0
+make build VERSION=0.2.1
 ```
 
 ## Plugin Store Release Assets
@@ -82,16 +82,16 @@ The GitHub Actions workflow builds plugin-store-compatible archives for:
 | `windows` | `amd64` | `windows-2025` |
 | `windows` | `arm64` | `go-cross/cgo-actions` on `ubuntu-24.04` |
 
-Tag pushes such as `v0.2.0` publish release assets named:
+Tag pushes such as `v0.2.1` publish release assets named:
 
 ```text
-joycode_0.2.0_linux_amd64.zip
-joycode_0.2.0_linux_arm64.zip
-joycode_0.2.0_freebsd_amd64.zip
-joycode_0.2.0_darwin_amd64.zip
-joycode_0.2.0_darwin_arm64.zip
-joycode_0.2.0_windows_amd64.zip
-joycode_0.2.0_windows_arm64.zip
+joycode_0.2.1_linux_amd64.zip
+joycode_0.2.1_linux_arm64.zip
+joycode_0.2.1_freebsd_amd64.zip
+joycode_0.2.1_darwin_amd64.zip
+joycode_0.2.1_darwin_arm64.zip
+joycode_0.2.1_windows_amd64.zip
+joycode_0.2.1_windows_arm64.zip
 checksums.txt
 ```
 
