@@ -175,7 +175,7 @@ func handleExecutorExecute(reqBody []byte) ([]byte, error) {
 
 	respBody = decompressGzip(respBody, httpResp.Headers)
 
-	if httpResp.StatusCode != 200 {
+	if httpResp.StatusCode != 0 && httpResp.StatusCode != 200 {
 		return nil, fmt.Errorf("joycode: API returned %d: %s", httpResp.StatusCode, string(respBody))
 	}
 
@@ -239,7 +239,7 @@ func handleExecutorExecuteStream(reqBody []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unmarshal stream response: %w", err)
 	}
 
-	if streamResp.StatusCode != 200 {
+	if streamResp.StatusCode != 0 && streamResp.StatusCode != 200 {
 		errBody := readStreamAll(streamResp.StreamID)
 		emitStreamError(req.StreamID, fmt.Sprintf("joycode: API returned %d: %s", streamResp.StatusCode, string(errBody)))
 		closeStream(streamResp.StreamID, "")
@@ -905,7 +905,7 @@ func handleModelForAuth(reqBody []byte) ([]byte, error) {
 		return handleModelStatic(reqBody)
 	}
 
-	if httpResp.StatusCode != 200 {
+	if httpResp.StatusCode != 0 && httpResp.StatusCode != 200 {
 		hostLog("warn", fmt.Sprintf("joycode: model list API returned %d, using static models", httpResp.StatusCode))
 		return handleModelStatic(reqBody)
 	}
@@ -1117,7 +1117,7 @@ func verifyJoyCodeToken(ptKey, loginType string) (*joyCodeTokenResult, error) {
 		return nil, fmt.Errorf("unmarshal userInfo response: %w", err)
 	}
 
-	if httpResp.StatusCode != 200 {
+	if httpResp.StatusCode != 0 && httpResp.StatusCode != 200 {
 		return nil, fmt.Errorf("userInfo returned HTTP %d", httpResp.StatusCode)
 	}
 
