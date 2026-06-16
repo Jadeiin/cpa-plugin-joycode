@@ -93,6 +93,8 @@ func cliproxy_plugin_init(host *C.cliproxy_host_api, plugin *C.cliproxy_plugin_a
 	if plugin == nil {
 		return 1
 	}
+	C.joycode_store_host_api(host)
+
 	joycodeABIState.Lock()
 	joycodeABIState.host = host
 	joycodeABIState.shuttingDown = false
@@ -159,6 +161,7 @@ func JoycodePluginShutdown() {
 	joycodeABIState.host = nil
 	joycodeABIState.Unlock()
 	joycodeABIState.inFlight.Wait()
+	C.joycode_store_host_api(nil)
 }
 
 func handleJoycodeABIMethod(ctx context.Context, method string, request []byte) ([]byte, error) {
