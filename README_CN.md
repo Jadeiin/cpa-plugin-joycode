@@ -65,7 +65,7 @@ Makefile 根据目标平台选择插件扩展名：
 发布构建可注入运行时版本号：
 
 ```bash
-make build VERSION=0.1.2
+make build VERSION=0.1.3
 ```
 
 ## 许可证

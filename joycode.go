@@ -129,17 +129,16 @@ func handleExecutorExecute(reqBody []byte) ([]byte, error) {
 		return nil, fmt.Errorf("unmarshal http response: %w", err)
 	}
 
-	if httpResp.StatusCode != 200 {
-		bodyBytes, _ := base64.StdEncoding.DecodeString(httpResp.Body)
-		return nil, fmt.Errorf("joycode: API returned %d: %s", httpResp.StatusCode, string(bodyBytes))
-	}
-
 	respBody, err := base64.StdEncoding.DecodeString(httpResp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("decode response body: %w", err)
 	}
 
 	respBody = decompressGzip(respBody, httpResp.Headers)
+
+	if httpResp.StatusCode != 200 {
+		return nil, fmt.Errorf("joycode: API returned %d: %s", httpResp.StatusCode, string(respBody))
+	}
 
 	return abiOKEnvelope(executorResponse{
 		Payload: base64.StdEncoding.EncodeToString(respBody),
