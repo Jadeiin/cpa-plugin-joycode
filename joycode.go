@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/hmac"
@@ -264,7 +263,8 @@ func readAndEmitStreamChunks(httpStreamID, pluginStreamID string) {
 	defer closeStream(pluginStreamID, "")
 	defer closeHTTPStream(httpStreamID)
 
-	scannerBuf := make([]byte, 0, 1024*1024)
+	buffer := make([]byte, 0, 1024*1024)
+	const maxBufferSize = 1024 * 1024
 
 	for {
 		chunkJSON, err := callHostJSON("host.http.stream_read", map[string]any{"stream_id": httpStreamID})
@@ -287,7 +287,11 @@ func readAndEmitStreamChunks(httpStreamID, pluginStreamID string) {
 			emitStreamError(pluginStreamID, readResp.Error)
 			return
 		}
+
 		if readResp.Done {
+			if len(buffer) > 0 {
+				emitSSEEvent(pluginStreamID, buffer)
+			}
 			return
 		}
 
@@ -296,32 +300,61 @@ func readAndEmitStreamChunks(httpStreamID, pluginStreamID string) {
 			continue
 		}
 
-		scannerBuf = append(scannerBuf[:0], chunkBytes...)
-		lines := splitLines(scannerBuf)
+		chunkBytes = bytes.ReplaceAll(chunkBytes, []byte("\r\n"), []byte("\n"))
 
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-
-			var data string
-			if strings.HasPrefix(line, "data: ") {
-				data = strings.TrimPrefix(line, "data: ")
-			} else if strings.HasPrefix(line, "data:") {
-				data = strings.TrimPrefix(line, "data:")
-			} else {
-				emitStreamChunk(pluginStreamID, []byte(line+"\n"))
-				continue
-			}
-
-			if data == "[DONE]" {
-				emitStreamChunk(pluginStreamID, []byte("data: [DONE]\n\n"))
-				return
-			}
-
-			emitStreamChunk(pluginStreamID, []byte("data: "+data+"\n\n"))
+		if len(buffer)+len(chunkBytes) > maxBufferSize {
+			emitStreamError(pluginStreamID, "SSE buffer exceeded 1MB limit")
+			return
 		}
+		buffer = append(buffer, chunkBytes...)
+
+		for {
+			idx := bytes.Index(buffer, []byte("\n\n"))
+			if idx == -1 {
+				break
+			}
+			event := buffer[:idx]
+			buffer = buffer[idx+2:]
+			emitSSEEvent(pluginStreamID, event)
+		}
+	}
+}
+
+func emitSSEEvent(streamID string, event []byte) {
+	lines := bytes.Split(event, []byte("\n"))
+	var dataLines []string
+
+	for _, line := range lines {
+		lineStr := string(bytes.TrimSpace(line))
+		if lineStr == "" {
+			continue
+		}
+
+		if strings.HasPrefix(lineStr, "data:") {
+			data := strings.TrimPrefix(lineStr, "data:")
+			data = strings.TrimSpace(data)
+			for strings.HasPrefix(data, "data:") {
+				data = strings.TrimPrefix(data, "data:")
+				data = strings.TrimSpace(data)
+			}
+			if data != "" {
+				dataLines = append(dataLines, data)
+			}
+		} else {
+			emitStreamChunk(streamID, []byte(lineStr+"\n\n"))
+		}
+	}
+
+	for _, data := range dataLines {
+		if data == "[DONE]" {
+			emitStreamChunk(streamID, []byte("data: [DONE]\n\n"))
+			return
+		}
+	}
+
+	if len(dataLines) > 0 {
+		combined := strings.Join(dataLines, "\n")
+		emitStreamChunk(streamID, []byte("data: "+combined+"\n\n"))
 	}
 }
 
@@ -1066,16 +1099,6 @@ func decompressGzip(data []byte, headers map[string][]string) []byte {
 		return data
 	}
 	return decompressed
-}
-
-func splitLines(data []byte) []string {
-	var lines []string
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	return lines
 }
 
 type joyCodeTokenResult struct {
