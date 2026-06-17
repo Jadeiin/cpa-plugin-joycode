@@ -28,9 +28,9 @@ const (
 	JCColorAppID   = "joycode_ide"
 
 	// Color gateway function IDs.
-	jcFnUserInfo      = "joycode_userInfo"
-	jcFnModelList     = "joycode_modelList"
-	jcFnChatComplete  = "chat_completions"
+	jcFnUserInfo     = "joycode_userInfo"
+	jcFnModelList    = "joycode_modelList"
+	jcFnChatComplete = "chat_completions"
 )
 
 // Known JoyCode models.
@@ -90,23 +90,23 @@ func handleExecutorIdentifier() ([]byte, error) {
 // --- executor.execute ---
 
 type executorRequest struct {
-	AuthID          string                 `json:"AuthID"`
-	AuthProvider    string                 `json:"AuthProvider"`
-	Model           string                 `json:"Model"`
-	Format          string                 `json:"Format"`
-	Stream          bool                   `json:"Stream"`
-	Alt             string                 `json:"Alt"`
-	Headers         map[string][]string    `json:"Headers"`
-	Query           map[string][]string    `json:"Query"`
-	OriginalRequest string                 `json:"OriginalRequest"`
-	SourceFormat    string                 `json:"SourceFormat"`
-	Payload         string                 `json:"Payload"`
-	Metadata        map[string]any         `json:"Metadata"`
-	StorageJSON     string                 `json:"StorageJSON"`
-	AuthMetadata    map[string]any         `json:"AuthMetadata"`
-	AuthAttributes  map[string]string      `json:"AuthAttributes"`
-	StreamID        string                 `json:"stream_id"`
-	HostCallbackID  string                 `json:"host_callback_id"`
+	AuthID          string              `json:"AuthID"`
+	AuthProvider    string              `json:"AuthProvider"`
+	Model           string              `json:"Model"`
+	Format          string              `json:"Format"`
+	Stream          bool                `json:"Stream"`
+	Alt             string              `json:"Alt"`
+	Headers         map[string][]string `json:"Headers"`
+	Query           map[string][]string `json:"Query"`
+	OriginalRequest string              `json:"OriginalRequest"`
+	SourceFormat    string              `json:"SourceFormat"`
+	Payload         string              `json:"Payload"`
+	Metadata        map[string]any      `json:"Metadata"`
+	StorageJSON     string              `json:"StorageJSON"`
+	AuthMetadata    map[string]any      `json:"AuthMetadata"`
+	AuthAttributes  map[string]string   `json:"AuthAttributes"`
+	StreamID        string              `json:"stream_id"`
+	HostCallbackID  string              `json:"host_callback_id"`
 }
 
 type executorResponse struct {
@@ -300,27 +300,63 @@ func readAndEmitStreamChunks(httpStreamID, pluginStreamID string) {
 			continue
 		}
 
-		chunkBytes = bytes.ReplaceAll(chunkBytes, []byte("\r\n"), []byte("\n"))
-
-		if len(buffer)+len(chunkBytes) > maxBufferSize {
-			emitStreamError(pluginStreamID, "SSE buffer exceeded 1MB limit")
-			return
-		}
 		buffer = append(buffer, chunkBytes...)
 
 		for {
-			idx := bytes.Index(buffer, []byte("\n\n"))
-			if idx == -1 {
+			event, ok := nextSSEEvent(&buffer)
+			if !ok {
 				break
 			}
-			event := buffer[:idx]
-			buffer = buffer[idx+2:]
 			emitSSEEvent(pluginStreamID, event)
+		}
+
+		if len(buffer) > maxBufferSize {
+			emitStreamError(pluginStreamID, "SSE buffer exceeded 1MB limit")
+			return
 		}
 	}
 }
 
-func emitSSEEvent(streamID string, event []byte) {
+func nextSSEEvent(buffer *[]byte) ([]byte, bool) {
+	lineEndingLen := func(idx int) int {
+		if idx >= len(*buffer) {
+			return 0
+		}
+		switch (*buffer)[idx] {
+		case '\r':
+			if idx+1 >= len(*buffer) {
+				return 0
+			}
+			if (*buffer)[idx+1] == '\n' {
+				return 2
+			}
+			return 1
+		case '\n':
+			return 1
+		default:
+			return 0
+		}
+	}
+
+	for i := 0; i < len(*buffer); i++ {
+		firstLen := lineEndingLen(i)
+		if firstLen == 0 {
+			continue
+		}
+		secondLen := lineEndingLen(i + firstLen)
+		if secondLen > 0 {
+			event := (*buffer)[:i]
+			*buffer = (*buffer)[i+firstLen+secondLen:]
+			return event, true
+		}
+		i += firstLen - 1
+	}
+	return nil, false
+}
+
+func sseEventDataPayload(event []byte) []byte {
+	event = bytes.ReplaceAll(event, []byte("\r\n"), []byte("\n"))
+	event = bytes.ReplaceAll(event, []byte("\r"), []byte("\n"))
 	lines := bytes.Split(event, []byte("\n"))
 	var dataLines []string
 
@@ -340,21 +376,25 @@ func emitSSEEvent(streamID string, event []byte) {
 			if data != "" {
 				dataLines = append(dataLines, data)
 			}
-		} else {
-			emitStreamChunk(streamID, []byte(lineStr+"\n\n"))
 		}
 	}
 
 	for _, data := range dataLines {
 		if data == "[DONE]" {
-			emitStreamChunk(streamID, []byte("data: [DONE]\n\n"))
-			return
+			return nil
 		}
 	}
 
-	if len(dataLines) > 0 {
-		combined := strings.Join(dataLines, "\n")
-		emitStreamChunk(streamID, []byte("data: "+combined+"\n\n"))
+	if len(dataLines) == 0 {
+		return nil
+	}
+
+	return []byte(strings.Join(dataLines, "\n"))
+}
+
+func emitSSEEvent(streamID string, event []byte) {
+	if payload := sseEventDataPayload(event); len(payload) > 0 {
+		emitStreamChunk(streamID, payload)
 	}
 }
 
@@ -998,13 +1038,13 @@ func handleModelForAuth(reqBody []byte) ([]byte, error) {
 		}
 
 		m := map[string]any{
-			"id":                  modelID,
-			"object":              "model",
-			"created":             created,
-			"owned_by":            "joycode",
-			"display_name":        displayName,
-			"description":         description,
-			"context_length":      int64(maxTotal),
+			"id":                    modelID,
+			"object":                "model",
+			"created":               created,
+			"owned_by":              "joycode",
+			"display_name":          displayName,
+			"description":           description,
+			"context_length":        int64(maxTotal),
 			"max_completion_tokens": int64(respMax),
 		}
 		if len(features) > 0 {

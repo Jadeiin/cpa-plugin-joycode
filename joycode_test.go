@@ -57,11 +57,11 @@ func TestSimpleAtoi(t *testing.T) {
 
 func TestParseSimpleURL(t *testing.T) {
 	tests := []struct {
-		raw   string
-		scheme string
-		host   string
-		port   string
-		path   string
+		raw     string
+		scheme  string
+		host    string
+		port    string
+		path    string
 		wantErr bool
 	}{
 		{"http://127.0.0.1:8317/callback", "http", "127.0.0.1", "8317", "/callback", false},
@@ -147,6 +147,80 @@ func TestDecompressGzip(t *testing.T) {
 			t.Errorf("decompressGzip() on invalid data = %q, want original %q", result, data)
 		}
 	})
+}
+
+func TestNextSSEEventAllowsLargeCompleteChunks(t *testing.T) {
+	event := []byte("data: {}\n\n")
+	buffer := bytes.Repeat(event, 120000)
+	buffer = append(buffer, []byte("data: pending")...)
+
+	if len(buffer) <= 1024*1024 {
+		t.Fatalf("test setup buffer length = %d, want over 1MB", len(buffer))
+	}
+
+	events := collectSSEEvents(&buffer)
+
+	if len(events) != 120000 {
+		t.Fatalf("collectSSEEvents() returned %d events, want 120000", len(events))
+	}
+	if string(buffer) != "data: pending" {
+		t.Fatalf("remaining buffer = %q, want pending event", string(buffer))
+	}
+	if len(buffer) > 1024*1024 {
+		t.Fatalf("remaining buffer length = %d, want under 1MB", len(buffer))
+	}
+}
+
+func TestNextSSEEventRecognizesSplitCRLFDelimiter(t *testing.T) {
+	buffer := []byte("data: first\r\n\r")
+
+	if events := collectSSEEvents(&buffer); len(events) != 0 {
+		t.Fatalf("collectSSEEvents() returned %d events before delimiter completed, want 0", len(events))
+	}
+
+	buffer = append(buffer, []byte("\ndata: second\r\n\r\npending")...)
+	events := collectSSEEvents(&buffer)
+
+	if len(events) != 2 {
+		t.Fatalf("collectSSEEvents() returned %d events, want 2", len(events))
+	}
+	if string(events[0]) != "data: first" {
+		t.Fatalf("first event = %q, want data: first", string(events[0]))
+	}
+	if string(events[1]) != "data: second" {
+		t.Fatalf("second event = %q, want data: second", string(events[1]))
+	}
+	if string(buffer) != "pending" {
+		t.Fatalf("remaining buffer = %q, want pending", string(buffer))
+	}
+}
+
+func TestSSEEventDataPayloadCombinesMultilineDataFields(t *testing.T) {
+	event := []byte("data: {\"choices\":[\ndata: {\"delta\":{\"content\":\"hi\"}}\ndata: ]}")
+
+	got := sseEventDataPayload(event)
+	want := []byte("{\"choices\":[\n{\"delta\":{\"content\":\"hi\"}}\n]}")
+
+	if !bytes.Equal(got, want) {
+		t.Fatalf("sseEventDataPayload() = %q, want %q", got, want)
+	}
+}
+
+func collectSSEEvents(buffer *[]byte) [][]byte {
+	var events [][]byte
+	for {
+		event, ok := nextSSEEvent(buffer)
+		if !ok {
+			return events
+		}
+		events = append(events, append([]byte(nil), event...))
+	}
+}
+
+func TestSSEEventDataPayloadSkipsDone(t *testing.T) {
+	if got := sseEventDataPayload([]byte("event: message\ndata: [DONE]")); got != nil {
+		t.Fatalf("sseEventDataPayload() = %q, want nil", got)
+	}
 }
 
 func TestInjectPayloadFields(t *testing.T) {
@@ -254,12 +328,12 @@ func TestBuildJCHeaders(t *testing.T) {
 func TestHandleAuthParse(t *testing.T) {
 	t.Run("valid joycode auth file", func(t *testing.T) {
 		raw := map[string]any{
-			"type":         "joycode",
-			"ptKey":        "test-pt-key",
-			"userId":       "user1",
-			"tenant":       "JD",
-			"orgFullName":  "Org",
-			"loginType":    "PIN_JD_CLOUD",
+			"type":        "joycode",
+			"ptKey":       "test-pt-key",
+			"userId":      "user1",
+			"tenant":      "JD",
+			"orgFullName": "Org",
+			"loginType":   "PIN_JD_CLOUD",
 		}
 		rawJSON, _ := json.Marshal(raw)
 
@@ -368,9 +442,9 @@ func TestABIRegistrationSerializesCorrectFieldNames(t *testing.T) {
 	}
 
 	var result struct {
-		SchemaVersion uint32             `json:"schema_version"`
-		Metadata      map[string]any     `json:"metadata"`
-		Capabilities  map[string]any     `json:"capabilities"`
+		SchemaVersion uint32         `json:"schema_version"`
+		Metadata      map[string]any `json:"metadata"`
+		Capabilities  map[string]any `json:"capabilities"`
 	}
 	if err := json.Unmarshal(env.Result, &result); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)

@@ -205,28 +205,28 @@ func handleRegister(request []byte) ([]byte, error) {
 		Metadata:      plugin.Metadata,
 		Capabilities: abiCapabilities{
 			Executor:              true,
-			ExecutorModelScope:   string(plugin.Capabilities.ExecutorModelScope),
-			ExecutorInputFormats: plugin.Capabilities.ExecutorInputFormats,
+			ExecutorModelScope:    string(plugin.Capabilities.ExecutorModelScope),
+			ExecutorInputFormats:  plugin.Capabilities.ExecutorInputFormats,
 			ExecutorOutputFormats: plugin.Capabilities.ExecutorOutputFormats,
-			AuthProvider:         true,
-			ModelProvider:        true,
+			AuthProvider:          true,
+			ModelProvider:         true,
 		},
 	})
 }
 
 type abiRegistration struct {
-	SchemaVersion    uint32             `json:"schema_version"`
-	Metadata         pluginapi.Metadata `json:"metadata"`
-	Capabilities     abiCapabilities    `json:"capabilities"`
+	SchemaVersion uint32             `json:"schema_version"`
+	Metadata      pluginapi.Metadata `json:"metadata"`
+	Capabilities  abiCapabilities    `json:"capabilities"`
 }
 
 type abiCapabilities struct {
-	Executor             bool     `json:"executor"`
-	ExecutorModelScope   string   `json:"executor_model_scope,omitempty"`
-	ExecutorInputFormats []string `json:"executor_input_formats,omitempty"`
+	Executor              bool     `json:"executor"`
+	ExecutorModelScope    string   `json:"executor_model_scope,omitempty"`
+	ExecutorInputFormats  []string `json:"executor_input_formats,omitempty"`
 	ExecutorOutputFormats []string `json:"executor_output_formats,omitempty"`
-	AuthProvider         bool     `json:"auth_provider"`
-	ModelProvider        bool     `json:"model_provider"`
+	AuthProvider          bool     `json:"auth_provider"`
+	ModelProvider         bool     `json:"model_provider"`
 }
 
 // --- Host callback helpers ---

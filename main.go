@@ -17,8 +17,8 @@ func buildPlugin() pluginapi.Plugin {
 			GitHubRepository: "https://github.com/Jadeiin/cpa-plugin-joycode",
 		},
 		Capabilities: pluginapi.Capabilities{
-			ExecutorModelScope:   pluginapi.ExecutorModelScopeBoth,
-			ExecutorInputFormats: []string{"chat-completions"},
+			ExecutorModelScope:    pluginapi.ExecutorModelScopeBoth,
+			ExecutorInputFormats:  []string{"chat-completions"},
 			ExecutorOutputFormats: []string{"chat-completions"},
 		},
 	}
