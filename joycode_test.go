@@ -149,6 +149,32 @@ func TestDecompressGzip(t *testing.T) {
 	})
 }
 
+func TestSplitLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"single line", "hello\n", []string{"hello"}},
+		{"multiple lines", "line1\nline2\nline3\n", []string{"line1", "line2", "line3"}},
+		{"empty input", "", nil},
+		{"CRLF", "line1\r\nline2\r\n", []string{"line1", "line2"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitLines([]byte(tt.input))
+			if len(got) != len(tt.want) {
+				t.Fatalf("splitLines() got %d lines, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("line[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func TestInjectPayloadFields(t *testing.T) {
 	t.Run("sets required fields", func(t *testing.T) {
 		input := map[string]any{"messages": []any{"hello"}}
