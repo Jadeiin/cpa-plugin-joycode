@@ -475,6 +475,16 @@ func TestABIRegistrationSerializesCorrectFieldNames(t *testing.T) {
 			t.Errorf("capabilities[%q] = %v, want true", key, val)
 		}
 	}
+
+	if scope, _ := result.Capabilities["executor_model_scope"].(string); scope != "both" {
+		t.Errorf("executor_model_scope = %q, want both", scope)
+	}
+	if formats, ok := stringSliceFromAny(result.Capabilities["executor_input_formats"]); !ok || len(formats) != 1 || formats[0] != "chat-completions" {
+		t.Errorf("executor_input_formats = %#v, want [chat-completions]", result.Capabilities["executor_input_formats"])
+	}
+	if formats, ok := stringSliceFromAny(result.Capabilities["executor_output_formats"]); !ok || len(formats) != 1 || formats[0] != "chat-completions" {
+		t.Errorf("executor_output_formats = %#v, want [chat-completions]", result.Capabilities["executor_output_formats"])
+	}
 }
 
 func mapKeys(m map[string]any) []string {
@@ -483,6 +493,22 @@ func mapKeys(m map[string]any) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+func stringSliceFromAny(v any) ([]string, bool) {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		s, ok := item.(string)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return out, true
 }
 
 func TestColorGatewaySign(t *testing.T) {
