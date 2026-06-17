@@ -311,7 +311,7 @@ func readAndEmitStreamChunks(httpStreamID, pluginStreamID string) {
 			} else if strings.HasPrefix(line, "data:") {
 				data = strings.TrimPrefix(line, "data:")
 			} else {
-				emitStreamChunk(pluginStreamID, []byte(line+"\n"))
+				emitStreamChunk(pluginStreamID, []byte(line+"\n\n"))
 				continue
 			}
 

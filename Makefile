@@ -1,5 +1,5 @@
 PLUGIN_NAME ?= joycode
-VERSION ?= 0.2.1
+VERSION ?= 0.2.2
 BUILD_DIR ?= .
 GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
